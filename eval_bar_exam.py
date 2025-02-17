@@ -64,13 +64,17 @@ async def score_answer(solution, correct_answer, semaphore):
             f"Correct answer: {correct_answer}\n"
             f"Solution answer: {solution}\n\n"
         )
-        response = await asyncio.to_thread(
-            scoring_client.chat.completions.create,
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=256,
-            temperature=0.0
-        )
+        try:
+            response = await asyncio.to_thread(
+                scoring_client.chat.completions.create,
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=256,
+                temperature=0.0
+            )
+        except Exception as e:
+            print(f"Error scoring answer: {e}")
+            return False
         return "Correct" in response.choices[0].message.content
 
 def load_bar_exam_dataset():

@@ -16,3 +16,4 @@ inference.sh
 .python-version
 .env
 scratch.py
+reasoning_traces copy/*

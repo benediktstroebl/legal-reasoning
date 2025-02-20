@@ -7,14 +7,18 @@ from tqdm import tqdm
 
 from dotenv import load_dotenv
 from prompts import convert_prompt, convert_prompt_example
-from openai import AzureOpenAI
+from openai import OpenAI, AsyncOpenAI
 
 load_dotenv()
 
-client = AzureOpenAI(
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    azure_endpoint="https://api-ai-sandbox.princeton.edu/",
-    api_version="2024-02-01"
+# client = AzureOpenAI(
+#     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+#     azure_endpoint="https://api-ai-sandbox.princeton.edu/",
+#     api_version="2024-02-01"
+# )
+
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
 )
 
 def process_content(content):
@@ -51,9 +55,9 @@ def process_file(file_path):
         with open(file_path, "r") as f:
             data = json.load(f)
             
-        if 'reformatted_text' in data:
-            print(f"Skipping {file_path} because it has already been reformatted")
-            return file_path, file_path
+        # if 'reformatted_text' in data:
+        #     print(f"Skipping {file_path} because it has already been reformatted")
+        #     return file_path, file_path
     except Exception as e:
         print(f"Error loading {file_path}: {e}")
         return file_path, file_path
@@ -73,7 +77,7 @@ async def main():
         description="Reformat generated texts for tax and barexam questions using Azure OpenAI"
     )
     parser.add_argument("--input_dir", type=str, required=True, help="Input directory containing sample JSON files.")
-    parser.add_argument("--max_concurrency", type=int, default=80, help="Maximum number of concurrent tasks")
+    parser.add_argument("--max_concurrency", type=int, default=10, help="Maximum number of concurrent tasks")
     args = parser.parse_args()
     file_paths = [
         os.path.join(args.input_dir, filename)

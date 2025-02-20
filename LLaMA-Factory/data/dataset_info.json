@@ -319,7 +319,7 @@
     }
   },
   "barexam_r1_qwen_32b": {
-    "file_name": "/scratch/gpfs/bs6865/legal-reasoning/barexam_r1_qwen_32b.json",
+    "file_name": "/home/legal-reasoning/barexam_r1_qwen_32b.json",
     "formatting": "sharegpt",
     "columns": {
       "messages": "conversations",

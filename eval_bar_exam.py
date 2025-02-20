@@ -5,7 +5,7 @@ import asyncio
 import random
 from tqdm import tqdm
 from datasets import load_dataset, Dataset
-from openai import AsyncOpenAI, AzureOpenAI
+from openai import AsyncOpenAI, AzureOpenAI, OpenAI
 from litellm import acompletion
 from dotenv import load_dotenv
 from asyncio import Semaphore
@@ -16,7 +16,7 @@ load_dotenv(override=True)
 instruct_model = "deepseek-ai/DeepSeek-R1"
 instruct_client = AsyncOpenAI(
     api_key="token-abc123", 
-    base_url="http://localhost:8001/v1"
+    base_url="http://localhost:8000/v1"
     # api_key=os.environ.get("TOGETHER_API_KEY"),
     # base_url="https://api.together.xyz/v1"
     )
@@ -25,6 +25,7 @@ scoring_client = AzureOpenAI(
     azure_endpoint="https://api-ai-sandbox.princeton.edu/",
     api_version="2024-02-01"
 )
+
 MAX_TOKENS = 8192
 DEFAULT_NUM_SAMPLES = 8
 CONCURRENCY_LIMIT = 50

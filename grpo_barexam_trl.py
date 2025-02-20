@@ -1,48 +1,38 @@
 import re
 import torch
+import os
 from datasets import load_dataset, Dataset, load_from_disk
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig, GRPOTrainer
-
-
-model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-output_dir="outputs/Qwen-0.5B-GRPO"
-run_name="Qwen-0.5B-GRPO-tax"
 
 # Load and prep dataset
 
 SYSTEM_PROMPT = """
 Respond in the following format:
-<reasoning>
+<|begin_of_thought|>
 ...
-</reasoning>
-<answer>
+<|end_of_thought|>
+<|begin_of_solution|>
 ...
-</answer>
+<|end_of_solution|>
 """
 
 BAREXAM_SYSTEM_PROMPT = """
-You are given a multiple-choice U.S. tax question. Your task is to return the letter corresponding to the correct answer (for example B). Respond in the following format:
-<reasoning>
-...
-</reasoning>
-<answer>
-...
-</answer>
+Your role as an assistant involves thoroughly exploring questions through a systematic long thinking process before providing the final precise and accurate solutions. This requires engaging in a comprehensive cycle of analysis, summarizing, exploration, reassessment, reflection, backtracing, and iteration to develop well-considered thinking process. Please structure your response into two main sections: Thought and Solution. In the Thought section, detail your reasoning process using the specified format: <|begin_of_thought|> {thought with steps separated with '\\n\\n'} <|end_of_thought|>. Each step should include detailed considerations such as analisying questions, summarizing relevant findings, brainstorming new ideas, verifying the accuracy of the current steps, refining any errors, and revisiting previous steps. In the Solution section, based on various attempts, explorations, and reflections from the Thought section, systematically present the final solution that you deem correct. The solution should remain a logical, accurate, concise expression style and detail necessary step needed to reach the conclusion, formatted as follows: <|begin_of_solution|> {final formatted, precise, and clear solution} <|end_of_solution|> Now, try to solve the following question through the above guidelines:
 """
 
 XML_COT_FORMAT = """\
-<reasoning>
+<|begin_of_thought|>
 {reasoning}
-</reasoning>
-<answer>
+<|end_of_thought|>
+<|begin_of_solution|>
 {answer}
-</answer>
+<|end_of_solution|>
 """
 
 def extract_xml_answer(text: str) -> str:
-    answer = text.split("<answer>")[-1]
-    answer = answer.split("</answer>")[0]
+    answer = text.split("<|begin_of_solution|>")[-1]
+    answer = answer.split("<|end_of_solution|>")[0]
     return answer.strip()
 
 # uncomment middle messages for 1-shot prompting
@@ -81,34 +71,34 @@ def correctness_reward_func(prompts, completions, answer, **kwargs) -> list[floa
     q = prompts[0][-1]['content']
     extracted_responses = [extract_xml_answer(r) for r in responses]
     print('-'*20, f"Question:\n{q}", f"\nAnswer:\n{answer[0]}", f"\nResponse:\n{responses[0]}", f"\nExtracted:\n{extracted_responses[0]}")
-    return [2.0 if r.lower() == a.lower() else 0.0 for r, a in zip(extracted_responses, answer)]
+    return [2.0 if r.strip().lower() == a.strip().lower() else 0.0 for r, a in zip(extracted_responses, answer)]
 
 def strict_format_reward_func(completions, **kwargs) -> list[float]:
     """Reward function that checks if the completion has a specific format."""
-    pattern = r"^<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
+    pattern = r"^<|begin_of_thought|>\n.*?\n<|end_of_thought|>\n<|begin_of_solution|>\n.*?\n<|end_of_solution|>\n$"
     responses = [completion[0]["content"] for completion in completions]
     matches = [re.match(pattern, r) for r in responses]
     return [0.5 if match else 0.0 for match in matches]
 
 def soft_format_reward_func(completions, **kwargs) -> list[float]:
     """Reward function that checks if the completion has a specific format."""
-    pattern = r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>"
+    pattern = r"<|begin_of_thought|>.*?<|end_of_thought|>\s*<|begin_of_solution|>.*?<|end_of_solution|>"
     responses = [completion[0]["content"] for completion in completions]
     matches = [re.match(pattern, r) for r in responses]
     return [0.5 if match else 0.0 for match in matches]
 
 def count_xml(text) -> float:
     count = 0.0
-    if text.count("<reasoning>\n") == 1:
+    if text.count("<|begin_of_thought|>\n") == 1:
         count += 0.125
-    if text.count("\n</reasoning>\n") == 1:
+    if text.count("\n<|end_of_thought|>\n") == 1:
         count += 0.125
-    if text.count("\n<answer>\n") == 1:
+    if text.count("\n<|begin_of_solution|>\n") == 1:
         count += 0.125
-        count -= len(text.split("\n</answer>\n")[-1])*0.001
-    if text.count("\n</answer>") == 1:
+        count -= len(text.split("\n<|end_of_solution|>\n")[-1])*0.001
+    if text.count("\n<|end_of_solution|>\n") == 1:
         count += 0.125
-        count -= (len(text.split("\n</answer>")[-1]) - 1)*0.001
+        count -= (len(text.split("\n<|end_of_solution|>\n")[-1]) - 1)*0.001
     return count
 
 def xmlcount_reward_func(completions, **kwargs) -> list[float]:
@@ -122,7 +112,7 @@ def main(args):
     run_name = args.run_name
     
     # Load dataset
-    dataset = get_tax_questions()
+    dataset = load_barexam_dataset()
 
     training_args = GRPOConfig(
         output_dir=output_dir,
@@ -135,38 +125,60 @@ def main(args):
         lr_scheduler_type='cosine',
         logging_steps=1,
         bf16=True,
-        per_device_train_batch_size=1,
+        per_device_train_batch_size=6,
         gradient_accumulation_steps=4,
-        num_generations=16,
-        max_prompt_length=256,
-        max_completion_length=200,
+        num_generations=6,
+        max_prompt_length=1024,
+        max_completion_length=3072,
         num_train_epochs=args.epochs,
-        save_steps=100,
+        save_steps=500,
         max_grad_norm=0.1,
         log_on_each_node=False,
         use_vllm=True,
-        vllm_gpu_memory_utilization=.3,
         vllm_device="cuda:0",
-        report_to="none" #I'm disabling Wandb.
+        vllm_gpu_memory_utilization=.5,
+        report_to="wandb" #I'm disabling Wandb.
     )
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        device_map=None
-    ).to("cuda")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
     
     # Load model and tokenizer
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,4,5,6,7"
+    from accelerate import infer_auto_device_map, init_empty_weights
+
+    
+    # with init_empty_weights():
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
-        device_map="auto"
+        device_map="balanced_low_0"
     )
+    # device_map = infer_auto_device_map(model, max_memory={
+    #     0: "0GiB", 
+    #     1: "76GiB", 
+    #     2: "76GiB", 
+    #     3: "76GiB", 
+    #     4: "76GiB", 
+    #     5: "76GiB", 
+    #     6: "76GiB", 
+    #     7: "76GiB"})
+    
+    # from huggingface_hub import snapshot_download
+    # # checkpoint = "marcsun13/gpt2-xl-linear-sharded"
+    # weights_location = snapshot_download(repo_id=model_name)
+    
+    # from accelerate import load_checkpoint_and_dispatch
+
+    # model = load_checkpoint_and_dispatch(
+    #     model, device_map=device_map, checkpoint=model_name
+    # )
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
+    
+    # unset cuda visible devices
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
     
     # use peft at your own risk; not working for me with multi-GPU training
     trainer = GRPOTrainer(
@@ -189,9 +201,9 @@ def main(args):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
-    parser.add_argument("--output_dir", type=str, default="outputs/Qwen-1.5B-GRPO-barexam")
-    parser.add_argument("--run_name", type=str, default="Qwen-1.5B-GRPO-barexam")
-    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument("--output_dir", type=str, default="outputs/Qwen-7B-GRPO-barexam")
+    parser.add_argument("--run_name", type=str, default="Qwen-7B-GRPO-barexam")
+    parser.add_argument("--epochs", type=int, default=3)
     args = parser.parse_args()
     main(args)

@@ -16,7 +16,7 @@ load_dotenv(override=True)
 instruct_model = "deepseek-ai/DeepSeek-R1"
 instruct_client = AsyncOpenAI(
     api_key="token-abc123", 
-    base_url="http://localhost:8000/v1"
+    base_url="http://localhost:8001/v1"
     # api_key=os.environ.get("TOGETHER_API_KEY"),
     # base_url="https://api.together.xyz/v1"
     )
@@ -43,8 +43,8 @@ async def perform_reasoning_trace_inference(prompt):
     return generated
 
 async def extract_solution(generated_text):
-    begin_tag = "[begin_of_solution]"
-    end_tag = "[end_of_solution]"
+    begin_tag = "<|begin_of_solution|>"
+    end_tag = "<|end_of_solution|>"
     start_index = generated_text.find(begin_tag)
     if start_index == -1:
         return generated_text
@@ -79,7 +79,7 @@ async def score_answer(solution, correct_answer, semaphore):
 
 def load_bar_exam_dataset():
     dataset = load_dataset("data/barexamqa-mbe", "qa")
-    raw_data = dataset["test"] if "test" in dataset else dataset["train"]
+    raw_data = dataset["test"]
     prompt_list = []
     for row in raw_data:
         answers_text = "\n".join([f"{i+1}. {choice}" for i, choice in enumerate([row["choice_a"], row["choice_b"], row["choice_c"], row["choice_d"]])])
